@@ -1,12 +1,11 @@
 import { Injectable, signal, NgZone } from '@angular/core';
 import { XmlService } from './xml.service';
-import saveAs from 'file-saver'; // <--- HIER WAR DER FEHLER (jetzt korrigiert)
+import saveAs from 'file-saver';
 
 @Injectable({
   providedIn: 'root'
 })
 export class KursService {
-  // Signale für den Zustand (damit die HTML-Seite darauf zugreifen kann)
   public rawData = signal<any>(null);
   public services = signal<any[]>([]); 
   
@@ -25,11 +24,12 @@ export class KursService {
           try {
             let xmlContent = e.target.result;
 
-            // Import-Reparatur für leere Attribute
+            // Import-Reparatur: Leere Attribute beim Laden abfangen
             if (typeof xmlContent === 'string') {
-              xmlContent = xmlContent.replace(/<EDUCATION type>/g, '<EDUCATION type="">');
-              xmlContent = xmlContent.replace(/<EDUCATION type\s*>/g, '<EDUCATION type="">');
-              xmlContent = xmlContent.replace(/<EDUCATION type\/>/g, '<EDUCATION type=""/>');
+              xmlContent = xmlContent.replace(/<EDUCATION type>/g, '<EDUCATION type="false">');
+              xmlContent = xmlContent.replace(/<EDUCATION type\s*>/g, '<EDUCATION type="false">');
+              xmlContent = xmlContent.replace(/<EDUCATION type="">/g, '<EDUCATION type="false">');
+              xmlContent = xmlContent.replace(/<EDUCATION type\/>/g, '<EDUCATION type="false"/>');
             }
 
             const parsedData = this.xmlService.parse(xmlContent);
@@ -124,7 +124,8 @@ export class KursService {
         service.SERVICE_DETAILS.SERVICE_MODULE = service.SERVICE_DETAILS.SERVICE_MODULE[0];
     }
     if (!service.SERVICE_DETAILS.SERVICE_MODULE.EDUCATION) {
-      service.SERVICE_DETAILS.SERVICE_MODULE.EDUCATION = { '@_type': '' };
+      // Standardmäßig auf false setzen, nicht leer!
+      service.SERVICE_DETAILS.SERVICE_MODULE.EDUCATION = { '@_type': 'false' };
     }
     if (!service.SERVICE_DETAILS.SERVICE_MODULE.EDUCATION.MODULE_COURSE) {
       service.SERVICE_DETAILS.SERVICE_MODULE.EDUCATION.MODULE_COURSE = {};
@@ -136,14 +137,21 @@ export class KursService {
     const deepCopy = JSON.parse(JSON.stringify(services));
     
     return deepCopy.map((s: any) => {
-      // Type Fix
+      
+      // REPARATUR-LOGIK FÜR EXPORT
       if (s.SERVICE_DETAILS?.SERVICE_MODULE?.EDUCATION) {
         const edu = s.SERVICE_DETAILS.SERVICE_MODULE.EDUCATION;
-        if (!edu['@_type'] || edu['@_type'] === true || edu['@_type'] === "true") {
-           edu['@_type'] = '';
+        
+        // WICHTIG: Hier stand vorher, dass es '' (leer) wird. Das war der Fehler.
+        // Jetzt: Wenn explizit true -> true. Sonst -> false. Niemals leer.
+        if (edu['@_type'] === true || edu['@_type'] === "true") {
+           edu['@_type'] = 'true';
+        } else {
+           edu['@_type'] = 'false'; 
         }
       }
-      // Date Fix
+
+      // Date Fix (ISO)
       if (s.SERVICE_DETAILS?.SERVICE_DATE) {
         const sd = s.SERVICE_DETAILS.SERVICE_DATE;
         if (sd.START_DATE) sd.START_DATE = this.toIsoDate(sd.START_DATE);
@@ -155,7 +163,8 @@ export class KursService {
 
   private toIsoDate(val: string): string {
     if (!val) return '';
-    if (val.match(/^\d{4}-\d{2}-\d{2}/)) return val;
+    if (val.match(/^\d{4}-\d{2}-\d{2}/)) return val; // Ist schon ISO
+    // Prüfen ob deutsches Format TT.MM.JJJJ
     const parts = val.split('.');
     if (parts.length === 3) return `${parts[2]}-${parts[1]}-${parts[0]}`;
     return val;
@@ -167,13 +176,11 @@ export class KursService {
 
   // --- EXPORT ---
 
-  // GESPERRT ("Aktuell nicht möglich")
   exportFull() {
     alert("Diese Funktion ist aktuell deaktiviert ('Aktuell nicht möglich').\n\nBitte nutzen Sie die Differenzlieferung, um Datenfehler zu vermeiden.");
     return; 
   }
 
-  // DIFFERENZ
   exportDiff(seqNumber: number) {
     const data = this.rawData(); if (!data) return;
     const header = { ...data.OPENQCAT.HEADER };
@@ -191,7 +198,9 @@ export class KursService {
       return;
     }
 
+    // Hier wird jetzt die reparierte sanitize-Funktion aufgerufen
     const cleanServices = this.sanitizeForExport(changedOrNewServices);
+    
     const updateObj = {
       OPENQCAT: {
         '@_version': '1.1',
